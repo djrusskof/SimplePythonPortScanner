@@ -102,9 +102,23 @@ def load_and_resize_image(path, size):
 root = tk.Tk()
 root.iconbitmap("images/SPPS.ico")
 root.title("SPPS - Simple Python Port Scanner")
-#root.resizable(False, False)
-root.geometry("800x600")
-root.minsize(800, 600)
+
+# Desired window size
+window_width = 800
+window_height = 600
+
+root.minsize(window_width, window_height)
+
+# Get the screen width and height
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+
+# Calculate the position to center the window
+position_x = (screen_width // 2) - (window_width // 2)
+position_y = (screen_height // 2) - (window_height // 2)
+
+# Set the geometry of the window
+root.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
 
 myappid = u'djrusskof.simplepythonportscanner.1.0.0'
 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
