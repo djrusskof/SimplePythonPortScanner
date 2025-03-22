@@ -1,9 +1,15 @@
+from datetime import datetime
+from PIL import Image, ImageTk
+from scapy.layers.inet import IP, TCP, UDP, ICMP
+from scapy.sendrecv import sr, sr1
+from tkinter import ttk
+
+import ctypes
 import time
 import tkinter as tk
-from PIL import Image, ImageTk
-from tkinter import ttk
-import ctypes
-import socket
+
+
+
 
 ''' 
 Constants
@@ -11,24 +17,109 @@ Constants
 START_SCAN = "Start"
 STOP_SCAN = "Stop"
 
+PORT_STATE_OPENED = "opened"
+PORT_STATE_OPEN_FILTERED = "open|filtered"
+PORT_STATE_FILTERED = "filtered"
+PORT_STATE_CLOSED = "closed"
+
+
 '''
-Function to Check if a port on a remote host is open.
+Global variables
 '''
-def is_port_open(host, port):
+openPortsList = []
+openFilteredPortsList = []
+filteredPortsList = []
+closedPortsList = []
+
+
+
+def tcp_connect_scan(host, port):
     """
-    Check if a port on a remote host is open.
-    
-    :param host: Hostname ou IP address (ex. '127.0.0.1' ou 'example.com')
+    Check if a port on a remote host is open using TCP connect (complete 3-way handshake) scan with scapy.
+
+    :param host: Hostname or IP address (ex. '127.0.0.1' ou 'example.com')
     :param port: Port number to check (ex. 80)
     :return: True if the port is open, False otherwise
     """
-    opened = False
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # 1s timeout
-    s.settimeout(0.2)
-    opened = s.connect_ex((host, port)) == 0
-    s.close()
-    return opened
+
+    portState = PORT_STATE_CLOSED
+    # Create a SYN packet
+    syn_packet = IP(dst=host)/TCP(dport=port, flags='S')
+    # Send the packet and wait for a response
+    response = sr1(syn_packet, timeout=1, verbose=False)
+    
+    if response is not None and response.haslayer(TCP):
+        Packet = response.getlayer(TCP)
+        if not Packet is None and Packet.flags == 0x12:  # SYN-ACK:
+            # Send a ACK packet to terminate the 3-way handshake
+            sr1(IP(dst=host)/TCP(dport=port, flags='A'), timeout=1, verbose=False)
+            portState = PORT_STATE_OPENED
+    
+    return portState
+
+
+def tcp_syn_scan(host, port, retries=3):
+    """
+    Realize a TCP SYN scan on a specific port of a host.
+
+    :param host: Hostname or IP address (ex. '127.0.0.1' ou 'example.com')
+    :param port: Port number to check (ex. 80)
+    :param retries: Number of retries to send the SYN packet
+    :return: True if the port is open, False otherwise
+    """
+    portState = PORT_STATE_FILTERED
+
+    for i in range(retries):
+         # Create a SYN packet
+        syn_packet = IP(dst=host)/TCP(dport=port, flags='S')
+        # Send the packet and wait for a response
+        response = sr1(syn_packet, timeout=1, verbose=False)
+        
+        if response is not None and response.haslayer(TCP) :
+            Packet = response.getlayer(TCP)
+            if not Packet is None:
+                if Packet.flags == 0x12 or Packet.flags == 0x02 :  # SYN-ACK or only SYN is admitted
+                    # Send a RST packet to close connection without finalizing the 3-way handshake
+                    sr(IP(dst=host)/TCP(dport=port, flags='R'), timeout=1, verbose=False)
+                    portState = PORT_STATE_OPENED
+                    break
+                elif Packet.flags == 0x14 or Packet.flags == 0x04:  # SYN-RST or only RST
+                    portState = PORT_STATE_CLOSED
+                    break
+
+    return portState
+
+
+def udp_scan(host, port, retries=3):
+    """
+    Realize a UDP scan on a specific port of a host.
+
+    :param host: Hostname or IP address (ex. '127.0.0.1' ou 'example.com')
+    :param port: Port number to check (ex. 80)
+    :param retries: Number of retries to send the UDP packet
+    :return: True if the port is open or filtered, False if the port is closed
+    """
+
+    portState = PORT_STATE_OPEN_FILTERED
+
+    for i in range(retries):
+        # Create a UDP packet
+        udp_packet = IP(dst=host)/UDP(dport=port)
+        # Send the packet and wait for a response
+        response = sr1(udp_packet, timeout=1, verbose=False)
+        
+        if response is not None and response.haslayer(ICMP):
+            icmp_layer = response.getlayer(ICMP)
+            if not icmp_layer is None:
+                if icmp_layer.type == 3 and icmp_layer.code == 3:
+                    # ICMP Port Unreachable message received, port is closed
+                    portState = PORT_STATE_CLOSED
+                    break
+                elif icmp_layer.type == 3 and icmp_layer.code in [1, 2, 9, 10, 13]:
+                    # ICMP Type 3, Code 1, 2, 9, 10, 13: Port is filtered
+                    portState = PORT_STATE_FILTERED
+                    break
+    return portState
 
 
 '''
@@ -37,6 +128,7 @@ Function to start the port scan on the host.
 def start_scan():
 
     displayEndScanTime = False
+    endScanReason = "ended"
     # Extract port range to scan
     if "-" in entryPort.get():
         startPort, endPort = entryPort.get().split("-")
@@ -54,25 +146,56 @@ def start_scan():
 
     if buttonStartScan.cget("text") == STOP_SCAN:
         displayEndScanTime = True
+        endScanReason = "canceled"
         buttonStartScan.config(text=START_SCAN)
     else:
+        openPortsList.clear()
+        openFilteredPortsList.clear()
+        filteredPortsList.clear()
+        closedPortsList.clear()
+
         buttonStartScan.config(text=STOP_SCAN)
         # Clear previous scan results
         textArea.delete(1.0, tk.END)
         # Display time of start scan
-        textArea.insert(tk.END, f"Scan started at {time.strftime('%H:%M:%S')}\n", "timestamp")
+        textArea.insert(tk.END, f"Started {selectedScanType.get()} scan at {time.strftime('%H:%M:%S')}\n", "timestamp")
 
     # Scan every port in the range
     for i in range(startPort, endPort + 1):
         if buttonStartScan.cget("text") == STOP_SCAN:
-           
-            if is_port_open(host, i):
-                textArea.insert(tk.END, f"Port {i} on host {host} is opened.\n", "opened")
-                print(f"Port {i} on host {host} is opened.")
-            else:
-                textArea.insert(tk.END, f"Port {i} on host {host} is closed.\n", "closed")
-                print(f"Port {i} on host {host} is closed.")
-            textArea.see("end")
+            # Display the scan result line
+            if(verbose_var.get() == True):
+                textArea.insert(tk.END, f"{time.strftime('%H:%M:%S')} ", "timestamp")
+                textArea.insert(tk.END, f"Port ")
+                textArea.insert(tk.END, f"{i} ", "port")
+                textArea.insert(tk.END, f"on host ")
+                textArea.insert(tk.END, f"{host} ", "host")
+                textArea.insert(tk.END, f"is ")
+
+            # Following scan type selected, call the appropriate function
+            if selectedScanType.get() == "TCP":
+                portState = tcp_connect_scan(host, i)
+            elif selectedScanType.get() == "TCP SYN":
+                portState = tcp_syn_scan(host, i)
+            elif selectedScanType.get() == "UDP":
+                portState = udp_scan(host, i)
+
+            # Add the port to the appropriate list
+            if(portState == PORT_STATE_OPENED):
+                openPortsList.append(i)
+            elif(portState == PORT_STATE_OPEN_FILTERED):
+                openFilteredPortsList.append(i)
+            elif(portState == PORT_STATE_FILTERED):
+                filteredPortsList.append(i)
+            elif(portState == PORT_STATE_CLOSED):
+                closedPortsList.append(i)
+
+            # Display the port state
+            print(f"Port {i} on host {host} is {portState}.")
+            if(verbose_var.get() == True):
+                textArea.insert(tk.END, f"{portState}\n", f"{portState}")
+                textArea.see("end")
+
             root.update()
         else:
             break
@@ -81,9 +204,15 @@ def start_scan():
 
     # Display time of end scan
     if displayEndScanTime:
-        textArea.insert(tk.END, f"Scan ended at {time.strftime('%H:%M:%S')}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(openPortsList)} opened port(s) : {openPortsList}, " +
+                        f"{len(openFilteredPortsList)} opened|filtered port(s) : {openFilteredPortsList}, " +
+                        f"{len(filteredPortsList)} filtered port(s) : {filteredPortsList}, " +
+                        f"{len(closedPortsList)} closed port(s) : {closedPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{selectedScanType.get()} scan {endScanReason} at {time.strftime('%H:%M:%S')}\n", "timestamp")
+        textArea.see("end")
 
     buttonStartScan.config(text=START_SCAN)
+
 
 '''
 Function to load and resize an image
@@ -133,11 +262,11 @@ top.grid_rowconfigure(0, weight=1)
 top.grid_rowconfigure(1, weight=1)
 top.grid_rowconfigure(2, weight=1)
 
-top.grid_columnconfigure(0, weight=1, uniform="ZOB")
-top.grid_columnconfigure(1, weight=1, uniform="ZOB")
-top.grid_columnconfigure(2, weight=1, uniform="ZOB")
-top.grid_columnconfigure(3, weight=1, uniform="ZOB")
-top.grid_columnconfigure(4, weight=1, uniform="ZOB")
+top.grid_columnconfigure(0, weight=1, uniform="uniform")
+top.grid_columnconfigure(1, weight=1, uniform="uniform")
+top.grid_columnconfigure(2, weight=1, uniform="uniform")
+top.grid_columnconfigure(3, weight=1, uniform="uniform")
+top.grid_columnconfigure(4, weight=1, uniform="uniform")
 
 
 # Desired image size
@@ -145,15 +274,18 @@ appImageSize = (50, 50)
 
 imgApp = load_and_resize_image("images/SPPS.png", appImageSize)
 
+# Create a StringVar to store the selected scan type
 selectedScanType = tk.StringVar()
+# Create a BooleanVar to store the state of the verbose checkbox
+verbose_var = tk.BooleanVar()
 
 # Create the label to display app image
 labelAppImage = tk.Label(top, image=imgApp)
-labelAppImage.grid(row=0, column=0, columnspan=5)
+labelAppImage.grid(row=0, column=0, columnspan=6)
 
 # Create the label to indicates the user to type a hosntame / ip address
 labelTypeHost = tk.Label(top, text="Please type hostname or IP address and port or port range :", pady=5)
-labelTypeHost.grid(row=1, column=0, columnspan=5)
+labelTypeHost.grid(row=1, column=0, columnspan=6)
 
 # Create the entry to type the hostname / ip address
 entryHost = tk.Entry(top, width=50, justify="center")
@@ -164,43 +296,29 @@ entryPort = tk.Entry(top, width=20, justify="center")
 entryPort.grid(row=2, column=2, padx=5)
 
 # Create the combobox to select the scan type
-scanType = ttk.Combobox(top, values=["TCP", "UDP"], textvariable=selectedScanType, state="readonly", width=5)
+scanType = ttk.Combobox(top, values=["TCP", "TCP SYN", "UDP"], textvariable=selectedScanType, state="readonly", width=10)
 scanType.set("TCP")
 scanType.grid(row=2, column=3, padx=5)
 
+# Create the verbose checkbox
+verbose_checkbox = tk.Checkbutton(top, text="verbose", variable=verbose_var)
+verbose_checkbox.grid(row=2, column=4, padx=5)
+
 # Create the button to start the scan
 buttonStartScan = tk.Button(top, text=START_SCAN, command=start_scan)
-buttonStartScan.grid(row=2, column=4)
-
-
-
-# Create the label to display app image
-#labelAppImage = tk.Label(root, image=imgApp, width=50, height=50)
-#labelAppImage.pack(in_=top)
-
-# Create the label to indicates the user to type a hosntame / ip address
-# labelTypeHost = tk.Label(root, text="Please type hostname or IP address and port or port range :", pady=10)
-# labelTypeHost.pack(in_=top)
-
-# Create the entry to type the hostname / ip address
-# entryHost = tk.Entry(root, width=30)
-# entryHost.pack(in_=top, side=tk.LEFT) 
-
-# # Create the entry to type the port / port range
-# entryPort = tk.Entry(root, width=10)
-# entryPort.pack(in_=top, side=tk.LEFT)
-
-# # Create the button to start the scan
-# buttonStartScan = tk.Button(root, text=START_SCAN, command=start_scan, width=10)
-# buttonStartScan.pack(in_=top, side=tk.RIGHT)
+buttonStartScan.grid(row=2, column=5)
 
 # Create the text area to display the scan results
 textArea = tk.Text(root)
 textArea.pack(in_=bottom, padx=5, pady=5, fill=tk.BOTH, expand=True)
 
 # Define tags for coloring text
-textArea.tag_configure("opened", foreground="green")
-textArea.tag_configure("closed", foreground="red")
+textArea.tag_configure(PORT_STATE_OPENED, foreground="green")
+textArea.tag_configure(PORT_STATE_CLOSED, foreground="red")
+textArea.tag_configure(PORT_STATE_FILTERED, foreground="orange")
+textArea.tag_configure(PORT_STATE_OPEN_FILTERED, foreground="orange")
 textArea.tag_configure("timestamp", foreground="gray")
+textArea.tag_configure("host", foreground="purple")
+textArea.tag_configure("port", foreground="brown")
 
 root.mainloop()
