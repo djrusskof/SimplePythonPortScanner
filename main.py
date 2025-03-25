@@ -7,6 +7,7 @@ from tkinter import ttk
 import ctypes
 import time
 import tkinter as tk
+import tkinter.filedialog as fd
 
 
 ''' 
@@ -386,8 +387,6 @@ def tcp_maimon_scan(host, port, retries=3):
 '''
 Function to start the port scan on the host.
 '''
-
-
 def start_scan():
 
     displayEndScanTime = False
@@ -412,6 +411,8 @@ def start_scan():
         endScanReason = "canceled"
         buttonStartScan.config(text=START_SCAN)
     else:
+        # Disable report saving at scan start
+        buttonSaveReport.config(state=tk.DISABLED)
         openPortsList.clear()
         openFilteredPortsList.clear()
         unFilteredPortsList.clear()
@@ -494,8 +495,31 @@ def start_scan():
         textArea.insert(
             tk.END, f"{selectedScanType.get()} scan {endScanReason} at {time.strftime('%H:%M:%S')}\n", "timestamp")
         textArea.see("end")
+        # Authorize the user to save the report
+        buttonSaveReport.config(state=tk.NORMAL)
 
     buttonStartScan.config(text=START_SCAN)
+
+
+'''
+Function to save the scan results to a file.
+'''
+def save_report(format="txt"):
+    """
+    Save the scan results to a file.
+    """
+    # Open dialog box to ask user where to save the file
+    file_path = fd.asksaveasfilename(defaultextension=".txt",
+                                     filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                                     title="Save scan report as")
+    if file_path:
+        try:
+            with open(file_path, 'w') as file:
+                # Write scan results to the file
+                file.write(textArea.get(1.0, tk.END))
+            print(f"Report saved to {file_path}")
+        except Exception as e:
+            print(f"Error saving report: {e}")
 
 
 '''
@@ -503,8 +527,6 @@ Function to load and resize an image
 This function loads an image from a file and resizes it to the desired size.
 It returns the image as a PhotoImage object.
 '''
-
-
 def load_and_resize_image(path, size):
     image = Image.open(path)
     image = image.resize(size)
@@ -545,6 +567,7 @@ bottom.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
 top.grid_rowconfigure(0, weight=1)
 top.grid_rowconfigure(1, weight=1)
 top.grid_rowconfigure(2, weight=1)
+top.grid_rowconfigure(3, weight=1)
 
 top.grid_columnconfigure(0, weight=1, uniform="uniform")
 top.grid_columnconfigure(1, weight=1, uniform="uniform")
@@ -594,6 +617,12 @@ verbose_checkbox.grid(row=2, column=4, padx=5)
 # Create the button to start the scan
 buttonStartScan = tk.Button(top, text=START_SCAN, command=start_scan)
 buttonStartScan.grid(row=2, column=5)
+
+# Create the button to save the report
+buttonSaveReport = tk.Button(top, text="Save report", command=save_report)
+buttonSaveReport.grid(row=3, column=5)
+# Disable report saving by default
+buttonSaveReport.config(state=tk.DISABLED)
 
 # Create the text area to display the scan results
 textArea = tk.Text(root)
