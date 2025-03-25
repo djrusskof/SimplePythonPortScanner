@@ -433,8 +433,8 @@ def start_scan():
                 textArea.insert(
                     tk.END, f"{time.strftime('%H:%M:%S')} ", "timestamp")
                 textArea.insert(tk.END, f"Port ")
-                textArea.insert(tk.END, f"{i} ", "port")
-                textArea.insert(tk.END, f"on host ")
+                textArea.insert(tk.END, f"{i}".rjust(5), "port")
+                textArea.insert(tk.END, f" on host ")
                 textArea.insert(tk.END, f"{host} ", "host")
                 textArea.insert(tk.END, f"is ")
 
