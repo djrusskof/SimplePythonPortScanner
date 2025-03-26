@@ -33,6 +33,10 @@ SCAN_TYPE_ACK = "ACK"
 SCAN_TYPE_WINDOW = "Window"
 SCAN_TYPE_MAIMON = "Maimon"
 
+SCAN_EXPORT_TXT = "TXT"
+SCAN_EXPORT_CSV = "CSV"
+SCAN_EXPORT_PDF = "PDF"
+
 
 '''
 Global variables
@@ -435,7 +439,7 @@ def start_scan():
                     tk.END, f"{time.strftime('%H:%M:%S')} ", "timestamp")
                 textArea.insert(tk.END, f"Port ")
                 textArea.insert(tk.END, f"{i}".rjust(5), "port")
-                textArea.insert(tk.END, f" on host ")
+                textArea.insert(tk.END, f" on ")
                 textArea.insert(tk.END, f"{host} ", "host")
                 textArea.insert(tk.END, f"is ")
 
@@ -487,11 +491,12 @@ def start_scan():
 
     # Display time of end scan
     if displayEndScanTime:
-        textArea.insert(tk.END, f"{len(openPortsList)} opened port(s) : {openPortsList}, " +
-                        f"{len(openFilteredPortsList)} opened|filtered port(s) : {openFilteredPortsList}, " +
-                        f"{len(unFilteredPortsList)} unfiltered port(s) : {unFilteredPortsList}, " +
-                        f"{len(filteredPortsList)} filtered port(s) : {filteredPortsList}, " +
-                        f"{len(closedPortsList)} closed port(s) : {closedPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(openPortsList)} opened port(s) : {openPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(openFilteredPortsList)} opened|filtered port(s) : {openFilteredPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(unFilteredPortsList)} unfiltered port(s) : {unFilteredPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(filteredPortsList)} filtered port(s) : {filteredPortsList}\n", "timestamp")
+        textArea.insert(tk.END, f"{len(closedPortsList)} closed port(s) : {closedPortsList}\n", "timestamp")
+        
         textArea.insert(
             tk.END, f"{selectedScanType.get()} scan {endScanReason} at {time.strftime('%H:%M:%S')}\n", "timestamp")
         textArea.see("end")
@@ -504,19 +509,34 @@ def start_scan():
 '''
 Function to save the scan results to a file.
 '''
-def save_report(format="txt"):
+def save_report():
     """
     Save the scan results to a file.
     """
-    # Open dialog box to ask user where to save the file
-    file_path = fd.asksaveasfilename(defaultextension=".txt",
-                                     filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-                                     title="Save scan report as")
-    if file_path:
+    file_path = ""
+    fileContent = ""
+    format = selectedScanReportFormat.get()
+
+    if(format == SCAN_EXPORT_TXT):
+        # Open dialog box to ask user where to save the file
+        file_path = fd.asksaveasfilename(defaultextension=".txt",
+                                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                                    title="Save scan report as")
+        fileContent = textArea.get(1.0, tk.END)
+    elif(format == SCAN_EXPORT_CSV):
+        # Open dialog box to ask user where to save the file
+        file_path = fd.asksaveasfilename(defaultextension=".csv",
+                                    filetypes=[("Text files", "*.csv"), ("All files", "*.*")],
+                                    title="Save scan report as")
+        fileContent = textArea.get(1.0, tk.END)
+        fileContent = fileContent.replace(" ", ",")
+
+    
+    if file_path is not None and file_path != "":
         try:
             with open(file_path, 'w') as file:
                 # Write scan results to the file
-                file.write(textArea.get(1.0, tk.END))
+                file.write(fileContent)
             print(f"Report saved to {file_path}")
         except Exception as e:
             print(f"Error saving report: {e}")
@@ -585,6 +605,8 @@ imgApp = load_and_resize_image("images/SPPS.png", appImageSize)
 selectedScanType = tk.StringVar()
 # Create a BooleanVar to store the state of the verbose checkbox
 verbose_var = tk.BooleanVar()
+# Create a StringVar to store the selected scan report format
+selectedScanReportFormat = tk.StringVar()
 
 # Create the label to display app image
 labelAppImage = tk.Label(top, image=imgApp)
@@ -617,6 +639,12 @@ verbose_checkbox.grid(row=2, column=4, padx=5)
 # Create the button to start the scan
 buttonStartScan = tk.Button(top, text=START_SCAN, command=start_scan)
 buttonStartScan.grid(row=2, column=5)
+
+# Create the combobox to select the scan report format
+scanReportFormat = ttk.Combobox(top, values=[SCAN_EXPORT_TXT, SCAN_EXPORT_CSV, SCAN_EXPORT_PDF], 
+                                textvariable=selectedScanReportFormat, state="readonly", width=10)
+scanReportFormat.set(SCAN_EXPORT_TXT)
+scanReportFormat.grid(row=3, column=4, padx=5)
 
 # Create the button to save the report
 buttonSaveReport = tk.Button(top, text="Save report", command=save_report)
